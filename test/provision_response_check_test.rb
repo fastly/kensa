@@ -67,6 +67,11 @@ class ProvisionResponseCheckTest < Test::Unit::TestCase
       assert_invalid
     end
 
+    test "only vars defined in manifest are in response" do
+      @response["config"]["MYADDON_URL_NOT_IN_MANIFEST"] = "http://localhost/abc" 
+      assert_invalid
+    end
+
     test "is valid otherwise" do
       @response["config"]["MYADDON_URL"] = "http://localhost/abc" 
       assert_valid

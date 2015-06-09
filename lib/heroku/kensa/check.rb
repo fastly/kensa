@@ -7,6 +7,7 @@ require 'term/ansicolor'
 module Heroku
   module Kensa
     class Check
+      include Term::ANSIColor
       attr_accessor :screen, :data
 
       class CheckError < StandardError ; end
@@ -166,7 +167,6 @@ module Heroku
 
 
     class ProvisionResponseCheck < Check
-      include Term::ANSIColor
 
       def call!
         response = data[:provision_response]
@@ -258,7 +258,7 @@ module Heroku
       end
 
       def heroku_id
-        "app#{rand(10000)}@kensa.heroku.com"
+        "app#{rand(10000)}@kensa-kensa-com"
       end
 
       def credentials
@@ -478,17 +478,25 @@ module Heroku
         end
 
         check "creates the heroku-nav-data cookie" do
-          cookie = agent.cookie_jar.cookies(URI.parse(@sso.full_url)).detect { |c| c.name == 'heroku-nav-data' }
-          error("could not find cookie heroku-nav-data") unless cookie
-          error("expected #{@sso.sample_nav_data}, got #{cookie.value}") unless cookie.value == @sso.sample_nav_data
+          if @sso.id =~ /heroku/
+            cookie = agent.cookie_jar.cookies(URI.parse(@sso.full_url)).detect { |c| c.name == 'heroku-nav-data' }
+            error("could not find cookie heroku-nav-data") unless cookie
+            error("expected #{@sso.sample_nav_data}, got #{cookie.value}") unless cookie.value == @sso.sample_nav_data
+          else
+            print "\n\t", yellow( "skipped because not heroku")
+          end
           true
         end
 
         check "displays the heroku layout" do
+          if @sso.id =~ /heroku/
             if page_logged_in.search('div#heroku-header').empty? &&
               page_logged_in.search('script[src*=boomerang]').empty?
               error("could not find Heroku layout")
             end
+          else
+            print "\n\t", yellow( "skipped because not heroku")
+          end
           true
         end
       end
