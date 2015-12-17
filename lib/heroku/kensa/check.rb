@@ -2,7 +2,7 @@ require 'mechanize'
 require 'socket'
 require 'timeout'
 require 'uri'
-require 'term/ansicolor'
+require 'colored'
 
 module Heroku
   module Kensa
@@ -43,6 +43,10 @@ module Heroku
         raise CheckError, msg
       end
 
+      def warning(msg)
+        screen.warning msg
+      end
+
       def call
         call!
         true
@@ -68,6 +72,10 @@ module Heroku
         else
           data['api'][env].chomp("/")
         end
+      end
+
+      def api_requires?(feature)
+        data["api"].fetch("requires", []).include?(feature)
       end
     end
 
@@ -96,11 +104,12 @@ module Heroku
           data["api"].is_a?(Hash)
         end
         check "has a list of regions" do
-          data["api"].has_key?("regions")
-          data["api"]["regions"].is_a?(Array)
+          data["api"].has_key?("regions") &&
+            data["api"]["regions"].is_a?(Array)
         end
         check "contains at least the US region" do
-          data["api"]["regions"].include? "us"
+          data["api"]["regions"].include?("us") ||
+            data["api"]["regions"].include?("*")
         end
         check "contains only valid region names" do
           data["api"]["regions"].all? { |reg| Manifest::REGIONS.include? reg }
@@ -128,12 +137,9 @@ module Heroku
           end
         end
 
-        if data["api"].has_key?("config_vars") 
+        if data["api"].has_key?("config_vars")
           check "contains config_vars array" do
             data["api"]["config_vars"].is_a?(Array)
-          end
-          check "contains at least one config var" do
-            !data["api"]["config_vars"].empty?
           end
           check "all config vars are uppercase strings" do
             data["api"]["config_vars"].each do |k, v|
@@ -146,11 +152,11 @@ module Heroku
           end
           check "all config vars are prefixed with the addon id" do
             data["api"]["config_vars"].each do |k|
-              addon_key = data['id'].upcase.gsub('-', '_')
-              if k =~ /^#{addon_key}_/
+              prefix = data["api"]["config_vars_prefix"] || data['id'].upcase.gsub('-', '_')
+              if k =~ /^#{prefix}_/
                 true
               else
-                error "#{k} is not a valid ENV key - must be prefixed with #{addon_key}_"
+                error "#{k} is not a valid ENV key - must be prefixed with #{prefix}_"
               end
             end
           end
@@ -167,13 +173,20 @@ module Heroku
 
 
     class ProvisionResponseCheck < Check
-
       def call!
         response = data[:provision_response]
         test "response"
 
         check "contains an id" do
-          response.is_a?(Hash) && response.has_key?("id")
+          response.is_a?(Hash) && response["id"]
+        end
+
+        check "id does not contain heroku_id" do
+          if response["id"].to_s.include? data["heroku_id"].scan(/app(\d+)@/).flatten.first
+            error "id cannot include heroku_id"
+          else
+            true
+          end
         end
 
         screen.message " (id #{response['id']})"
@@ -192,10 +205,10 @@ module Heroku
           end
 
           check "all keys in the manifest are present" do
-            difference = data['api']['config_vars'] - response['config'].keys 
+            difference = data['api']['config_vars'] - response['config'].keys
             unless difference.empty?
               verb = (difference.size == 1) ? "is" : "are"
-              print "\n\t", yellow( "#{difference.join(', ')} #{verb} missing from the manifest")
+              warning "#{difference.join(', ')} #{verb} missing from the provision response"
             end
             true
           end
@@ -224,13 +237,13 @@ module Heroku
             end
           end
 
-          check "syslog_drain_url is returned if required" do
-            return true unless data.has_key?("requires") && data["requires"].include?("syslog_drain")
+          check "log_drain_url is returned if required" do
+            return true unless api_requires?("syslog_drain")
 
-            drain_url = response['syslog_drain_url']
+            drain_url = response['log_drain_url']
 
             if !drain_url || drain_url.empty?
-              error "must return a syslog_drain_url"
+              error "must return a log_drain_url"
             else
               true
             end
@@ -246,7 +259,6 @@ module Heroku
       end
 
     end
-
 
     class ApiCheck < Check
       def base_path
@@ -264,6 +276,61 @@ module Heroku
       def credentials
         [ data['id'], data['api']['password'] ]
       end
+
+      def callback
+        "http://localhost:7779/callback/999"
+      end
+
+      def create_provision_payload
+        payload = {
+          :heroku_id => heroku_id,
+          :plan => data[:plan] || 'test',
+          :callback_url => callback,
+          :logplex_token => nil,
+          :region => "amazon-web-services::us-east-1",
+          :options => data[:options] || {},
+          :uuid => SecureRandom.uuid
+        }
+
+        if api_requires?("syslog_drain")
+          payload[:log_drain_token] = SecureRandom.hex
+        end
+        payload
+      end
+    end
+
+    class DuplicateProvisionCheck < ApiCheck
+      include HTTP
+
+      READLEN = 1024 * 10
+
+      def call!
+
+        json = nil
+        response = nil
+
+        code = nil
+        json = nil
+        reader, writer = nil
+
+        payload = create_provision_payload
+
+        code1, json1 = post(credentials, base_path, payload)
+        code2, json2 = post(credentials, base_path, payload)
+
+        json1 = OkJson.decode(json1)
+        json2 = OkJson.decode(json2)
+
+        if api_requires?("many_per_app")
+          check "returns different ids" do
+            if json1["id"] == json2["id"]
+              error "multiple provisions cannot return the same id"
+            else
+              true
+            end
+          end
+        end
+      end
     end
 
     class ProvisionCheck < ApiCheck
@@ -277,22 +344,15 @@ module Heroku
 
         code = nil
         json = nil
-        callback = "http://localhost:7779/callback/999"
         reader, writer = nil
 
-        payload = {
-          :heroku_id => heroku_id,
-          :plan => data[:plan] || 'test',
-          :callback_url => callback, 
-          :logplex_token => nil,
-          :options => data[:options] || {}
-        }
+        payload = create_provision_payload
 
         if data[:async]
           reader, writer = IO.pipe
         end
 
-        test "POST /heroku/resources"
+        test "POST #{base_path}"
         check "response" do
           if data[:async]
             child = fork do
@@ -347,7 +407,11 @@ module Heroku
 
         data[:provision_response] = response
 
-        run ProvisionResponseCheck, data
+        run ProvisionResponseCheck, data.merge("heroku_id" => heroku_id)
+
+        if !api_requires?("many_per_app")
+          run DuplicateProvisionCheck, data
+        end
       end
 
     ensure
@@ -458,7 +522,7 @@ module Heroku
 
         check "validates token" do
           @sso.token = 'invalid'
-          page, respcode = mechanize_get 
+          page, respcode = mechanize_get
           error("expected 403, got #{respcode}") unless respcode == 403
           true
         end
@@ -472,7 +536,7 @@ module Heroku
 
         page_logged_in = nil
         check "logs in" do
-          page_logged_in, respcode = mechanize_get 
+          page_logged_in, respcode = mechanize_get
           error("expected 200, got #{respcode}") unless respcode == 200
           true
         end
@@ -514,6 +578,7 @@ module Heroku
 
       def call!
         args = data[:args]
+        run ManifestCheck, data
         run ProvisionCheck, data
 
         response = data[:provision_response]

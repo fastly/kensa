@@ -13,6 +13,7 @@ class ProvisionResponseCheckTest < Test::Unit::TestCase
                 }}
     @data = Manifest.new.skeleton.merge(:provision_response => @response)
     @data['api']['config_vars'] << "MYADDON_CONFIG"
+    @data["heroku_id"] = "app987@kensa.heroku.com"
   end
 
   test "is valid if no errors" do
@@ -21,6 +22,11 @@ class ProvisionResponseCheckTest < Test::Unit::TestCase
 
   test "has an id" do
     @response.delete("id")
+    assert_invalid
+  end
+
+  test "id does not contain the heroku_id" do
+    @response["id"] = "987"
     assert_invalid
   end
 
@@ -79,21 +85,21 @@ class ProvisionResponseCheckTest < Test::Unit::TestCase
 
     describe "when syslog drain is required" do
       setup do
-        @data["requires"] = ["syslog_drain"]
+        @data["api"]["requires"] = ["syslog_drain"]
       end
 
-      test "response is invalid without a syslog_drain_url" do
-        @response['syslog_drain_url'] = ''
+      test "response is invalid without a log_drain_url" do
+        @response['log_drain_url'] = ''
         assert_invalid
       end
 
-      test "response is invalid if syslog_drain_url is invalid" do
-        @response['syslog_drain_url'] = 'ftp://host.example.com'
+      test "response is invalid if log_drain_url is invalid" do
+        @response['log_drain_url'] = 'ftp://host.example.com'
         assert_invalid
       end
 
-      test "response is valid with a syslog_drain_url" do
-        @response['syslog_drain_url'] = 'syslog://log.example.com:9999'
+      test "response is valid with a log_drain_url" do
+        @response['log_drain_url'] = 'syslog://log.example.com:9999'
         assert_valid
       end
     end

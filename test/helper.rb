@@ -1,17 +1,32 @@
 require 'heroku/kensa'
 require 'heroku/kensa/client'
 require 'contest'
-require 'coveralls'
 require 'timecop'
 require 'rr'
 require 'artifice'
 require 'test/resources/server'
 require 'fakefs/safe'
 
-Coveralls.wear!
-
 class Test::Unit::TestCase
   include RR::Adapters::TestUnit
+
+  class ProvisionRecord
+    def self.provisions
+      @provisions ||= 0
+    end
+
+    def self.incr
+      @provisions += 1
+    end
+
+    def self.reset
+      @provisions = 0
+    end
+
+    def self.count
+      @provisions
+    end
+  end
 
   module ProviderMock
     def setup

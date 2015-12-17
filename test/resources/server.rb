@@ -35,17 +35,58 @@ helpers do
       raise "#{param} not included with request" unless params.keys.include? param
     end
   end
-  
+
   def login(heroku_user=true)
   @header = heroku_user
-  haml <<-HAML
-%html
-%body
-  - if @header
-    #heroku-header
-      %h1 Heroku
-  %h1 Sample Addon
-HAML
+  erb <<-ERB
+<html>
+  <body>
+    <% if @header %>
+      <div id="heroku-header">
+        <h1>Heroku</h1>
+      </div>
+    <% end %>
+    <h1>Sample Add-on</h1>
+  </body>
+</html>
+ERB
+  end
+end
+
+class ProvisionRecord
+  def self.provisions
+    @provisions ||= 0
+  end
+
+  def self.incr
+    @provisions += 1
+  end
+
+  def self.reset
+    @provisions = 0
+  end
+
+  def self.count
+    @provisions
+  end
+end
+
+post '/working_duplicate/heroku/resources' do
+  heroku_only!
+  ProvisionRecord.incr
+  { id: ProvisionRecord.count }.to_json
+end
+
+post '/duplicate/heroku/resources' do
+  heroku_only!
+  ProvisionRecord.incr
+
+  if ProvisionRecord.count > 1
+    status 422
+    {}.to_json
+  else
+    status 201
+    { id: 123 }.to_json
   end
 end
 
@@ -55,7 +96,7 @@ post '/heroku/resources' do
 end
 
 post '/working/heroku/resources' do
-  json_must_include(%w{heroku_id plan callback_url logplex_token options})
+  json_must_include(%w{heroku_id plan callback_url options})
   heroku_only!
   { :id => 123 }.to_json
 end

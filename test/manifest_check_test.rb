@@ -50,6 +50,11 @@ class ManifestCheckTest < Test::Unit::TestCase
         assert_invalid
       end
 
+      test "api allows just wildcard region name" do
+        @data["api"]["regions"] = ["*"]
+        assert_valid
+      end
+
       test "api has a password" do
         @data["api"].delete("password")
         assert_invalid
@@ -92,14 +97,37 @@ class ManifestCheckTest < Test::Unit::TestCase
           assert_invalid
         end
 
-        test "contains at least one config var" do
-          @data["api"]["config_vars"].clear
-          assert_invalid
-        end
-
         test "all config vars are in upper case" do
           @data["api"]["config_vars"] << 'MYADDON_invalid_var'
           assert_invalid
+        end
+
+        context "when config_var_prefix is set" do
+          context "to something other than the slug" do
+            test "config vars matching config_vars_prefix are valid" do
+              @data["api"]["config_vars_prefix"] = "THING"
+              @data["api"]["config_vars"] = ['THING_URL']
+              assert_valid
+            end
+
+            test "config vars matching slug are invalid" do
+              @data["api"]["config_vars_prefix"] = "THING"
+              @data["api"]["config_vars"] << "MYADDON_URL"
+              assert_invalid
+            end
+          end
+        end
+
+        context "when config_var_prefix is not set" do
+          test "config vars matching slug are valid" do
+            @data["api"]["config_vars"] << 'MYADDON_URL'
+            assert_valid
+          end
+
+          test "config vars not matching slug are invalid" do
+            @data["api"]["config_vars"] << "NOT_SLUG_URL"
+            assert_invalid
+          end
         end
 
         test "assert config var prefixes match addon id" do

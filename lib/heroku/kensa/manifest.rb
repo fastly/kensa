@@ -3,7 +3,7 @@ require 'securerandom'
 module Heroku
   module Kensa
     class Manifest
-      REGIONS = %w(us eu)
+      REGIONS = %w(us eu *)
 
       def initialize(options = {})
         @method   = options.fetch(:method, 'post').to_sym
@@ -26,7 +26,8 @@ module Heroku
     "regions": [ "us" ],
     "password": "#{@password}",#{ sso_key }
     "production": "https://yourapp.com/",
-    "test": "http://localhost:#{@port}/"
+    "test": "http://localhost:#{@port}/",
+    "requires": []
   }
 }
 JSON
@@ -38,6 +39,7 @@ JSON
   "id": "myaddon",
   "api": {
     "config_vars": [ "MYADDON_URL" ],
+    "requires": [],
     "regions": [ "us" ],
     "password": "#{@password}",#{ sso_key }
     "production": {

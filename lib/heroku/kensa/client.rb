@@ -1,7 +1,8 @@
 require 'restclient'
-require 'term/ansicolor'
 require 'launchy'
 require 'optparse'
+require 'netrc'
+require 'colored'
 
 module Heroku
   module Kensa
@@ -25,9 +26,9 @@ module Heroku
         manifest = Manifest.new(@options)
         protect_current_manifest!
         manifest.write
-        screen.message "Initialized new addon manifest in #{filename}\n" 
+        screen.message "Initialized new addon manifest in #{filename}\n"
         if @options[:foreman]
-          screen.message "Initialized new .env file for foreman\n"
+          screen.message "Initialized new .env file\n"
         end
       end
 
@@ -42,7 +43,7 @@ module Heroku
           @options[:foreman] = true
           init
         rescue Exception => e
-          raise CommandInvalid.new("error cloning #{Git.clone_url(template)} into #{app_name}") 
+          raise CommandInvalid.new("error cloning #{Git.clone_url(template)} into #{app_name}")
         end
       end
 
@@ -73,7 +74,6 @@ module Heroku
 
       def run
         abort "! missing command to run; see usage" if @args.empty?
-        run_check ManifestCheck
         run_check AllCheck, :args => @args
       end
 
@@ -90,9 +90,13 @@ module Heroku
         host     = heroku_host
         data     = decoded_manifest
         resource = RestClient::Resource.new(host, user, password)
-        resource['provider/addons'].post(resolve_manifest, headers)
+        manifest = resource['provider/addons'].post(resolve_manifest, headers)
+
         puts "-----> Manifest for \"#{data['id']}\" was pushed successfully"
         puts "       Continue at #{(heroku_host)}/provider/addons/#{data['id']}"
+
+        # Update local manifest with response from addons.heroku.com
+        File.open(filename, 'w') { |f| f.puts manifest } unless manifest.strip.empty?
       rescue RestClient::UnprocessableEntity, RestClient::BadRequest => e
         abort("FAILED: #{e.response}")
       rescue RestClient::Unauthorized
@@ -125,7 +129,7 @@ module Heroku
             puts
           end
         end
-        
+
         def filename
           @options[:filename]
         end
@@ -186,6 +190,14 @@ module Heroku
         end
 
         def ask_for_credentials
+          netrc_creds = Netrc.read['api.heroku.com']
+          if netrc_creds
+            print "Found credentials for #{netrc_creds.login}, proceed? (y/N) "
+            if gets.chomp.downcase == "y"
+              return [ netrc_creds.login, netrc_creds.password]
+            end
+          end
+
           puts "Enter your Heroku Provider credentials."
 
           print "Email: "
@@ -224,8 +236,6 @@ module Heroku
 
 
       class Screen
-        include Term::ANSIColor
-
         def test(msg)
           $stdout.puts
           $stdout.puts
@@ -238,11 +248,15 @@ module Heroku
         end
 
         def error(msg)
-          $stdout.print "\n", red("    #{msg}")
+          $stdout.print "\n", "    #{msg}".red
+        end
+
+        def warning(msg)
+          $stdout.print "\n", "    #{msg}".yellow
         end
 
         def result(status)
-          msg = status ? green("[PASS]") : red(bold("[FAIL]"))
+          msg = status ? "[PASS]".green : "[FAIL]".red.bold
           $stdout.print " #{msg}"
         end
 
@@ -274,7 +288,7 @@ module Heroku
         # OptionParser errors out on unnamed options so we have to pull out all the --flags and --flag=somethings
         KNOWN_ARGS = %w{file async production without-sso help plan version sso foreman template}
         def self.pre_parse(args)
-          args.partition do |token| 
+          args.partition do |token|
             token.match(/^--/) && !token.match(/^--(#{KNOWN_ARGS.join('|')})/)
           end.reverse
         end
@@ -288,7 +302,7 @@ module Heroku
                 value = peek && !peek.match(/^--/) ? peek : 'true'
               end
               key = key.sub(/^--/,'')
-              options[key] = value 
+              options[key] = value
             end
           end
         end
@@ -318,11 +332,11 @@ module Heroku
             end
           end
         end
-        
+
         def self.parse(args)
           if args[0] == 'test' && args[1] == 'provision'
             safe_args, extra_params = self.pre_parse(args)
-            self.defaults.tap do |options| 
+            self.defaults.tap do |options|
               options.merge! self.parse_command_line(safe_args)
               options.merge! :options => self.parse_provision(extra_params, args)
             end
@@ -330,7 +344,7 @@ module Heroku
             self.defaults.merge(self.parse_command_line(args))
           end
         end
-      end 
+      end
     end
   end
 end
